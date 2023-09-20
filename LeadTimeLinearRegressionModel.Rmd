@@ -1,0 +1,59 @@
+Lendo os dados do histórico de entregas:
+```{r}
+library(readxl)
+setwd(choose.dir())
+BD <- read_xlsx("NomedaPlanilha.xlsx")
+```
+
+Medidas e consultas:
+```{r}
+# Quero reestruturar meus dados, criando uma visualização agrupada de origem e destino
+library(tidyverse)
+medidas <- BD %>%
+  group_by(Origem,Destino,UFDestino) %>%
+  summarise(
+    Media_prazo = mean(Prazo),
+    Desvio_padrao = ifelse(is.na(sd(Prazo)),0, sd(Prazo))
+    )
+# Selecionar somente os dados com baixo desvio padrão
+medidas <- medidas[medidas$Desvio_padrao <= 1.6,]
+# Criando uma chave para reconhecimento específico
+medidas$chave <- paste(medidas$Origem,medidas$Destino,medidas$UFDestino)
+
+```
+
+Carregando base de dados das distancias entre cidades e colocando na base medidas:
+```{r}
+Base_cidades <- read_xlsx("PlanilhaOrigemCidades.xlsx")
+# distancias entre a origem e a cidade de destino. Essa informação se torna necessária pois o tempo de entrega está relacionado a distancia percorrida. 
+medidas$Distancia_origem_destino <- ifelse(medidas$chave %in% Base_cidades$chave,
+                       Base_cidades$Distancia_origem_destino[match(medidas$chave,                                          Base_cidades$chave)],"Não encontrado")
+# distancias entre o destino e a capital do estado em questão. Essa informação pode não ser necessária mas é uma variável a mais para nosso estudo, que faz sentido, pois geralmente as rotas para capitais são mais acessíveis e algumas frotas passam primeiramente pela capital para pegar mais mercadoria antes de ir para o destino final. 
+medidas$Distancia_destino_capital <- ifelse(medidas$chave %in% Base_cidades$chave,
+                       Base_cidades$Distancia_destino_capital[match(medidas$chave,
+                       Base_cidades$chave)],"Não encontrado")
+```
+
+Manipular algumas variavies e criar o modelo de Regressão linear para calculo do prazo para outras cidades:
+```{r}
+OrigensDummies <- as.data.frame(model.matrix(~ Origem - 1, data = medidas))
+UFDummies <- as.data.frame(model.matrix(~ UFDestino - 1, data = medidas))
+medidas <- cbind(medidas,OrigensDummies,UFDummies)
+
+# Com as variaveis categóricas transformadas em dummies (valores de 0 e 1 para TRUE & FALSE), pode-se remover algumas colunas : Origem, Destino, UFDestino, chave.
+
+medidas <- medidas[,c(-1,-2,-3,-6)] # Poderia ter deixado as colunas e selecionado as que eu quero trabalhar na função do modelo, mas preferi fazer assim.
+
+modelo <- lm(Media_prazo ~ ., data = medidas)
+
+# Para previsão das outras cidades vamos precisar fazer os dummies das variaveis categóricas no que queremos prever também.
+
+OrigensDummiesPrev <- as.data.frame(model.matrix(~ Origem - 1, data = Base_cidades))
+UFDummiesPrev <- as.data.frame(model.matrix(~ UFDestino - 1, data = Base_cidades))
+Base_cidades <- cbind(Base_cidades,OrigensDummiesPrev,UFDummiesPrev)
+
+Base_cidades$Prazo <- round(predict(modelo, newdata = Base_cidades))
+# A validação do modelo foi feito por "Nivel de serviço". Comparando esses prazos dados pelo modelo com os prazos que utilizavamos no passado e analisando se as entregas cumpririam ou atrasariam com os novos prazos.
+```
+
+
