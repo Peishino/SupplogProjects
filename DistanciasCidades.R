@@ -38,6 +38,7 @@ colnames(dist_matrix) <- BD$Região
 rownames(dist_matrix) <- BD$Região
 # vou salvar essa matriz para não precisar ficar rodando.
 save(dist_matrix, file = "MatrizDistancias.RData")
+save(BD, file = "BaseLongLat.RData")
 
 #ideias
 # criar um cluster de distâncias entre cidades para agrupamento das cargas

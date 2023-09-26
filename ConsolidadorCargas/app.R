@@ -5,8 +5,11 @@
 library(shiny) # biblioteca do shiny
 library(shinydashboard) # biblioteca do shiny dashboards que ajuda na estruturação da pagina como um dashboard
 library(leaflet) # biblioteca leaflet que ajuda na criação de mapas
-library(readxl)
+library(readxl) # biblioteca para ler as planilhas
+library(tidyverse) # biblioteca para manipular os dados
 
+# Carregando a base de dados de latitudes e longitudes 
+load("BaseLongLat.RData")
 
 # UI recebe as características visuais que mais tarde vão iteragir com as funções do Server
 ui <- dashboardPage(
@@ -35,7 +38,12 @@ ui <- dashboardPage(
 server <- function(input, output, session) {
     dados <- reactive({
         req(input$file)
-        read_xlsx(input$file$datapath)
+        df <- read_xlsx(input$file$datapath)
+        
+        # Converter a coluna de data para o formato correto (dd/mm/aaaa)
+        df$`Data Faturamento` <- as.Date(df$`Data Faturamento`, format = "%d/%m/%Y")
+        
+        return(df)
     })
     
     observe({
@@ -45,7 +53,7 @@ server <- function(input, output, session) {
     observe({
         origem <- input$origem
         if (!is.null(origem)) {
-            filtered_data <- dados()[dados()$Filial == origem,]
+            filtered_data <- dados() %>% filter(Filial == origem)
             updateSelectInput(session, "regiao", choices = unique(filtered_data$`Região Brasil`))
         }
     })
@@ -54,33 +62,56 @@ server <- function(input, output, session) {
         origem <- input$origem
         regiao <- input$regiao
         if (!is.null(origem) && !is.null(regiao)) {
-            filtered_data <- dados()[dados()$Filial == origem & dados()$`Região Brasil` == regiao,]
+            filtered_data <- dados() %>% filter(Filial == origem, `Região Brasil` == regiao)
             updateSelectInput(session, "data_disponivel", choices = unique(filtered_data$`Data Faturamento`))
         }
+    })
+    observe({
+        updateSelectInput(session, "cidade_transbordo", choices = unique(BD$Região))
     })
     
     dados_filtrados <- reactive({
         filtered_data <- dados()
+        
         if (!is.null(input$origem)) {
-            filtered_data <- filtered_data[filtered_data$Filial == input$origem,]
+            filtered_data <- filtered_data %>% filter(Filial == input$origem)
         }
         if (!is.null(input$regiao)) {
-            filtered_data <- filtered_data[filtered_data$`Região Brasil` == input$regiao,]
+            filtered_data <- filtered_data %>% filter(`Região Brasil` == input$regiao)
         }
-        #if (!is.null(input$data_disponivel)) {
-        #    filtered_data <- filtered_data[filtered_data$`Data Faturamento` == input$data_disponivel,]
-        #} 
-        #minha função de filtrar a data está dando errado.
+        if (!is.null(input$data_disponivel)) {
+            filtered_data <- filtered_data %>% filter(`Data Faturamento` == input$data_disponivel)
+        } 
+        
         return(filtered_data)
     })
+
+
     output$mapa <- renderLeaflet({
-        leaflet(data = dados_filtrados()) %>%
+        mapa <- leaflet(data = dados_filtrados()) %>%
             addTiles() %>%
             addMarkers(
                 lng = ~longitude,
                 lat = ~latitude,
                 popup = ~`Cidade Destino`
             )
+        
+        if (!is.null(cidade_selecionada)) {
+            # Filtra os dados da cidade selecionada
+            cidade_data <- BD[BD$região == cidade_selecionada,]
+            
+            # Adiciona marcadores vermelhos para cada cidade
+            mapa <- mapa %>%
+                addMarkers(
+                    data = cidade_data,
+                    lng = ~Longitude,
+                    lat = ~Latitude,
+                    popup = ~Cidade,
+                    icon = makeIcon(iconUrl = "http://www.clker.com/cliparts/n/T/q/X/8/V/red-marker-png-hi.png", iconWidth = 30, iconHeight = 40)
+                )
+        }
+        
+        return(mapa)
     })
     
     output$volumetria <- renderValueBox({
