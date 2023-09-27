@@ -7,9 +7,9 @@ library(shinydashboard) # biblioteca do shiny dashboards que ajuda na estrutura�
 library(leaflet) # biblioteca leaflet que ajuda na criação de mapas
 library(readxl) # biblioteca para ler as planilhas
 library(tidyverse) # biblioteca para manipular os dados
-
+getwd()
 # Carregando a base de dados de latitudes e longitudes 
-load("BaseLongLat.RData")
+load("C:/Users/gabriel.freitas/OneDrive - SUPPORTE ARM VENDAS E LOG INTEGRADA LTDA/Documentos/SupplogBusinessIntelligence/BaseLongLat.RData")
 
 # UI recebe as características visuais que mais tarde vão iteragir com as funções do Server
 ui <- dashboardPage(
@@ -54,7 +54,23 @@ server <- function(input, output, session) {
         origem <- input$origem
         if (!is.null(origem)) {
             filtered_data <- dados() %>% filter(Filial == origem)
-            updateSelectInput(session, "regiao", choices = unique(filtered_data$`Região Brasil`))
+            updateSelectizeInput(
+                session, 
+                "regiao", 
+                choices = unique(filtered_data$`Região Brasil`),
+                options = list(
+                    placeholder = "Digite a região...",
+                    onInitialize = I('function() { this.setValue(""); }'),
+                    maxOptions = 10,
+                    render = I(
+                        '{
+                    item: function(item, escape) {
+                        return "<div>" + escape(item.text) + "</div>";
+                        },
+                    }'
+                    )
+                )
+            )
         }
     })
     
@@ -67,7 +83,26 @@ server <- function(input, output, session) {
         }
     })
     observe({
-        updateSelectInput(session, "cidade_transbordo", choices = unique(BD$Região))
+        updateSelectizeInput(
+            session,
+            "cidade_transbordo",
+            choices = unique(BD$Região),
+            options = list(
+                placeholder = "Digite a cidade de transbordo...",
+                onInitialize = I('function() { this.setValue(""); }'),
+                maxOptions = 10,
+                render = I(
+                    '{
+                    item: function(item, escape) {
+                        return "<div>" + escape(item.text) + "</div>";
+                    },
+                    option_create: function(data, escape) {
+                        return "<div class=\'create\'>Adicionar <strong>" + escape(data.input) + "</strong>...</div>";
+                    }
+                }'
+                )
+            )
+        )
     })
     
     dados_filtrados <- reactive({
@@ -86,30 +121,21 @@ server <- function(input, output, session) {
         return(filtered_data)
     })
 
-
+    #pesquisar mais sobre o pacote Leaflet
     output$mapa <- renderLeaflet({
         mapa <- leaflet(data = dados_filtrados()) %>%
             addTiles() %>%
             addMarkers(
-                lng = ~longitude,
-                lat = ~latitude,
-                popup = ~`Cidade Destino`
+                popup = ~paste(`Cidade Destino`, "<br>", `Nota Fiscal`),
+                clusterOptions = markerClusterOptions()
             )
-        
-        if (!is.null(cidade_selecionada)) {
-            # Filtra os dados da cidade selecionada
-            cidade_data <- BD[BD$região == cidade_selecionada,]
-            
-            # Adiciona marcadores vermelhos para cada cidade
-            mapa <- mapa %>%
-                addMarkers(
-                    data = cidade_data,
-                    lng = ~Longitude,
-                    lat = ~Latitude,
-                    popup = ~Cidade,
-                    icon = makeIcon(iconUrl = "http://www.clker.com/cliparts/n/T/q/X/8/V/red-marker-png-hi.png", iconWidth = 30, iconHeight = 40)
-                )
-        }
+        BD_filtrado <- BD[BD$Região == input$cidade_transbordo,]
+        mapa <- mapa %>%
+            addMarkers(
+                data = BD_filtrado,
+                lng = ~Longitude,
+                lat = ~Latitude,
+            )
         
         return(mapa)
     })
@@ -118,7 +144,7 @@ server <- function(input, output, session) {
         valueBox(
             value = nrow(dados_filtrados()),
             subtitle = "Volumetria",
-            icon = icon("list"),
+            icon = icon("warehouse"),
             color = "blue"
         )
     })
@@ -127,7 +153,7 @@ server <- function(input, output, session) {
         valueBox(
             value = sum(dados_filtrados()$Cubagem),
             subtitle = "Cubagem",
-            icon = icon("list"),
+            icon = icon("boxes-stacked"),
             color = "blue"
         )
     })
@@ -145,18 +171,17 @@ server <- function(input, output, session) {
         valueBox(
             value = sum(dados_filtrados()$`Valor da NF`),
             subtitle = "Preço da Mercadoria",
-            icon = icon("list"),
+            icon = icon("coins"),
             color = "blue"
         )
     })
     
     observe({
-        cidade_transbordo <- input$cidade_transbordo
         custo_transbordo <- input$custo_transbordo
         preco_lotacao <- input$preco_lotacao
         
         # continuação
-        # ...
+        # a ideia é colocar as regras de utilização dos veículos aqui e ele fazer essas regras de veículo para a carga consolidada por região
     })
 }
 
