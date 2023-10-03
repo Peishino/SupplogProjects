@@ -1,14 +1,16 @@
 # A ideia é criar uma aplicação onde eu insira uma planilha das notas roteirizadas no mês.
 # Agrupar as notas por regiões do Brasil e pelas origens. Retornando algumas informações desses agrupamentos.
 # criar um calculo com inputs tbm para definir a cidade de transbordo para o destino final.
+
 {
   library(shiny) # biblioteca do shiny
   library(shinydashboard) # biblioteca do shiny dashboards que ajuda na estruturação da pagina como um dashboard
   library(leaflet) # biblioteca leaflet que ajuda na criação de mapas
   library(readxl) # biblioteca para ler as planilhas
   library(tidyverse) # biblioteca para manipular os dados
+  library(leaflet.extras)
 }
-getwd()
+
 # Carregando a base de dados de latitudes e longitudes 
 #load("LongLat.RData")
 
@@ -19,7 +21,7 @@ ui <- dashboardPage(
     fileInput("file", "Inserir Planilha Excel"),
     selectInput("origem", "Filtrar por Origem", choices = c("Todos", NULL), selected = "Todos"),
     selectInput("regiao", "Filtrar por Região", choices = c("Todos", NULL), selected = "Todos"),
-    selectInput("data_disponivel", "Escolha uma Data", choices = NULL),
+    dateRangeInput("range_dates", "Selecione um período de datas:", start = NULL, end = NULL),
     selectInput("cidade_transbordo", "Cidade de Transbordo", choices = NULL),
     numericInput("custo_transbordo", "Custo do Transbordo", value = NULL),
     numericInput("preco_lotacao", "Custo da Lotação", value = NULL)
@@ -40,10 +42,7 @@ server <- function(input, output, session) {
   dados <- reactive({
     req(input$file)
     df <- read_xlsx(input$file$datapath)
-    
-    # Converter a coluna de data para o formato correto (dd/mm/aaaa)
     df$`Data Faturamento` <- as.Date(df$`Data Faturamento`, format = "%d/%m/%Y")
-    
     return(df)
   })
   
@@ -76,26 +75,17 @@ server <- function(input, output, session) {
     if (!is.null(origem) && !is.null(regiao)) {
       if (origem == "Todos" && regiao == "Todos") {
         filtered_data <- dados()
-        updateSelectInput(session, "data_disponivel", choices = c("Todos",unique(filtered_data$`Data Faturamento`)))
+      } else if (origem == "Todos" && regiao != "Todos") {
+        filtered_data <- dados() %>% filter(`Região Brasil` == regiao)
+      } else if (origem != "Todos" && regiao == "Todos") {
+        filtered_data <- dados() %>% filter(Filial == origem)
+      } else {
+        filtered_data <- dados() %>% filter(Filial == origem, `Região Brasil` == regiao)
       }
-      else { 
-        if (origem == "Todos" && regiao != "Todos") {
-          filtered_data <- dados() %>% filter(`Região Brasil` == regiao)
-          updateSelectInput(session, "data_disponivel", choices = c("Todos",unique(filtered_data$`Data Faturamento`)))
-        }
-        else {
-          if (origem != "Todos" && regiao == "Todos"){
-            filtered_data <- dados() %>% filter(Filial == origem)
-            updateSelectInput(session, "data_disponivel", choices = c("Todos",unique(filtered_data$`Data Faturamento`)))
-          }
-          else {
-            filtered_data <- dados() %>% filter(Filial == origem, `Região Brasil` == regiao)
-            updateSelectInput(session, "data_disponivel", choices = unique("Todos",filtered_data$`Data Faturamento`))
-          }
-        }
-      } 
+      dates <- unique(filtered_data$`Data Faturamento`)
+      updateDateRangeInput(session, "range_dates", start = min(dates), end = max(dates))
     }
-  })# estou tendo um problema com a data, consiste em ele não reconhecer como data por causa do "todos" como opção
+  })
   
   #cidade selecionavel
   observe({
@@ -109,11 +99,13 @@ server <- function(input, output, session) {
         maxOptions = 10,
         render = I(
           '{
-                    item: function(item, escape) {
-                        return "<div>" + escape(item.text) + "</div>";
-                    },
-                }'
-        )
+          item: function(item, escape) {
+            return "<div>" + escape(item.text) + "</div>";
+          },
+        }'
+        ),
+        labelField = "text",
+        searchField = "text"   
       )
     )
   })
@@ -123,23 +115,34 @@ server <- function(input, output, session) {
     
     origem <- input$origem
     regiao <- input$regiao
-    dia <- input$data_disponivel
+    intervalo_datas <- input$range_dates
+    
     if (origem != "Todos") {
-      filtered_data <- dados() %>% filter(Filial == origem)
-    } else {
-      filtered_data <- dados()
+      filtered_data <- filtered_data %>% filter(Filial == origem)
     }
+    
     if (regiao != "Todos") {
-      filtered_data <- filtered_data %>% filter(`Região Brasil` == input$regiao)
+      filtered_data <- filtered_data %>% filter(`Região Brasil` == regiao)
     }
-    if (dia != "Todos") {
-      filtered_data <- filtered_data %>% filter(`Data Faturamento` == input$data_disponivel)
-    } 
+    
+    if (!is.null(intervalo_datas)) {
+      filtered_data <- filtered_data %>% filter(`Data Faturamento` >= intervalo_datas[1] & `Data Faturamento` <= intervalo_datas[2])
+    }
     
     return(filtered_data)
   })
-  
-  #pesquisar mais sobre o pacote Leaflet
+  TransbIcon <- awesomeIcons(
+    icon = 'truck-fast',
+    iconColor = 'black',
+    library = 'fa',
+    markerColor = 'orange'
+  )
+  OriginIcon <- awesomeIcons(
+    icon = 'warehouse',
+    iconColor = 'black',
+    library = 'fa',
+    markerColor = 'orange'
+  )
   output$mapa <- renderLeaflet({
     mapa <- leaflet(data = dados_filtrados()) %>%
       addTiles() %>%
@@ -147,12 +150,22 @@ server <- function(input, output, session) {
         popup = ~paste(`Cidade Destino`, "<br>", `Nota Fiscal`),
         clusterOptions = markerClusterOptions()
       )
-    BD_filtrado <- BD[BD$Região == input$cidade_transbordo,]
+    Origem_filtrada <- BD[BD$Cidade == input$origem,]
     mapa <- mapa %>%
-      addMarkers(
-        data = BD_filtrado,
+      addAwesomeMarkers(
+        data = Origem_filtrada,
         lng = ~Longitude,
         lat = ~Latitude,
+        icon = OriginIcon
+
+      )
+    Transbordo_filtrado <- BD[BD$Região == input$cidade_transbordo,]
+    mapa <- mapa %>%
+      addAwesomeMarkers(
+        data = Transbordo_filtrado,
+        lng = ~Longitude,
+        lat = ~Latitude,
+        icon = TransbIcon
       )
     
     return(mapa)
