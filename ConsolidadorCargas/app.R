@@ -1,7 +1,3 @@
-# A ideia é criar uma aplicação onde eu insira uma planilha das notas roteirizadas no mês.
-# Agrupar as notas por regiões do Brasil e pelas origens. Retornando algumas informações desses agrupamentos.
-# criar um calculo com inputs tbm para definir a cidade de transbordo para o destino final.
-
 {
   library(shiny) # biblioteca do shiny
   library(shinydashboard) # biblioteca do shiny dashboards que ajuda na estruturação da pagina como um dashboard
@@ -9,10 +5,12 @@
   library(readxl) # biblioteca para ler as planilhas
   library(tidyverse) # biblioteca para manipular os dados
   library(leaflet.extras)
+  library(DT)
+  library(lpSolve)
 }
 
 # Carregando a base de dados de latitudes e longitudes 
-#load("LongLat.RData")
+# load("LongLat.RData")
 
 # UI recebe as características visuais que mais tarde vão iteragir com as funções do Server
 ui <- dashboardPage(
@@ -23,7 +21,7 @@ ui <- dashboardPage(
     selectInput("regiao", "Filtrar por Região", choices = c("Todos", NULL), selected = "Todos"),
     dateRangeInput("range_dates", "Selecione um período de datas:", start = NULL, end = NULL),
     selectInput("cidade_transbordo", "Cidade de Transbordo", choices = NULL),
-    numericInput("custo_transbordo", "Custo do Transbordo", value = NULL),
+    numericInput("custo_armazen", "Custo do Armazen", value = NULL),
     numericInput("preco_lotacao", "Custo da Lotação", value = NULL)
   ),
   dashboardBody(
@@ -32,7 +30,8 @@ ui <- dashboardPage(
       valueBoxOutput("volumetria",width = 3),
       valueBoxOutput("cubagem",width = 3),
       valueBoxOutput("peso",width = 3),
-      valueBoxOutput("preco_mercadoria",width = 3)
+      valueBoxOutput("preco_mercadoria",width = 3),
+      dataTableOutput("tabela_notinhas")
     )
   )
 )
@@ -51,7 +50,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "origem", choices = c("Todos",unique(dados()$Filial)))
   })
   
-  # Regiões possíveis do filtro de Regiões
+  # Regiões possíveis do filtro de Regiões, organizar uma visão por mesoregião.
   observe({
     origem <- input$origem
     if (!is.null(origem)) {
@@ -208,12 +207,33 @@ server <- function(input, output, session) {
   })
   
   observe({
-    custo_transbordo <- input$custo_transbordo
+    custo_armazen <- input$custo_armazen
     preco_lotacao <- input$preco_lotacao
     
-    # continuação
-    # a ideia é colocar as regras de utilização dos veículos aqui e ele fazer essas regras de veículo para a carga consolidada por região
   })
+  output$tabela_notinhas <- renderDataTable({
+    data <- dados_filtrados()
+    columns_to_show <- c('Filial', 'Nota Fiscal','Concatenar cidade', 'Tomador', 'Cubagem', 'Peso NF', 'Valor da NF')
+    
+    datatable(
+      data[, columns_to_show, drop = FALSE],
+      options = list(
+        columnDefs = list(list(className = 'dt-center', targets = "_all")),
+        pageLength = 10,
+        dom = 'tip',
+        rownames = FALSE,
+        select = 'single',
+        ordering = FALSE
+      ),
+      callback = JS(
+        "table.on('select', function(e, dt, type, indexes) {",
+        "  var selectedData = table.rows(indexes).data().toArray();",
+        "  Shiny.setInputValue('selected_notinhas', selectedData);",
+        "});"
+      )
+    )
+  })
+  
 }
 
 shinyApp(ui, server)
