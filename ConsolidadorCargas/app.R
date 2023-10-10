@@ -1,6 +1,7 @@
 {
   library(shiny) # biblioteca do shiny
   library(shinydashboard) # biblioteca do shiny dashboards que ajuda na estruturação da pagina como um dashboard
+  library(shinyjs)
   library(leaflet) # biblioteca leaflet que ajuda na criação de mapas
   library(readxl) # biblioteca para ler as planilhas
   library(tidyverse) # biblioteca para manipular os dados
@@ -9,8 +10,14 @@
   library(lpSolve)
 }
 
+gerar_chave <- function(origem, cidade_transbordo, veiculo) {
+  chave <- paste(origem, cidade_transbordo, veiculo, sep = "_")
+  return(chave)
+}
+
 # Carregando a base de dados de latitudes e longitudes 
 # load("LongLat.RData")
+# load("Transb.RData")
 
 # UI recebe as características visuais que mais tarde vão iteragir com as funções do Server
 ui <- dashboardPage(
@@ -21,8 +28,9 @@ ui <- dashboardPage(
     selectInput("regiao", "Filtrar por Região", choices = c("Todos", NULL), selected = "Todos"),
     dateRangeInput("range_dates", "Selecione um período de datas:", start = NULL, end = NULL),
     selectInput("cidade_transbordo", "Cidade de Transbordo", choices = NULL),
+    actionButton("add_veiculo_btn", label = "Adicionar Veículo"),
     numericInput("custo_armazen", "Custo do Armazen", value = NULL),
-    numericInput("preco_lotacao", "Custo da Lotação", value = NULL)
+    valueBoxOutput("preco_lotacao", width = 12)
   ),
   dashboardBody(
     leafletOutput("mapa"),
@@ -31,6 +39,10 @@ ui <- dashboardPage(
       valueBoxOutput("cubagem",width = 3),
       valueBoxOutput("peso",width = 3),
       valueBoxOutput("preco_mercadoria",width = 3),
+      valueBoxOutput("num_carretas", width = 3),
+      valueBoxOutput("num_trucks", width = 3),
+      valueBoxOutput("num_tocos", width = 3),
+      valueBoxOutput("num_34s", width = 3),
       dataTableOutput("tabela_notinhas")
     )
   )
@@ -66,7 +78,7 @@ server <- function(input, output, session) {
     }
   })
   
-  #data
+  # data
   observe({
     origem <- input$origem
     regiao <- input$regiao
@@ -86,12 +98,24 @@ server <- function(input, output, session) {
     }
   })
   
-  #cidade selecionavel
-  observe({
+  # cidade selecionavel
+
+  observeEvent(input$origem, {
+    origem_selecionada <- input$origem
+    
+    if (!is.null(origem_selecionada) && origem_selecionada != "Todos") {
+      # Filtrar as opções com base na origem selecionada
+      opcoes_filtradas <- unique(Transb[Transb$ORIGEM == origem_selecionada, "CONCATENA"])
+    } else {
+      # Se "Todos" for selecionado, mostre todas as opções
+      opcoes_filtradas <- unique(Transb$CONCATENA)
+    }
+    
+    # Atualizar as opções do selectizeInput
     updateSelectizeInput(
       session,
       "cidade_transbordo",
-      choices = unique(BD$Região),
+      choices = opcoes_filtradas,
       options = list(
         placeholder = "Digite a cidade de transbordo...",
         onInitialize = I('function() { this.setValue(""); }'),
@@ -130,6 +154,7 @@ server <- function(input, output, session) {
     
     return(filtered_data)
   })
+  
   TransbIcon <- awesomeIcons(
     icon = 'truck-fast',
     iconColor = 'black',
@@ -142,6 +167,7 @@ server <- function(input, output, session) {
     library = 'fa',
     markerColor = 'orange'
   )
+  # mapa
   output$mapa <- renderLeaflet({
     mapa <- leaflet(data = dados_filtrados()) %>%
       addTiles() %>%
@@ -169,7 +195,7 @@ server <- function(input, output, session) {
     
     return(mapa)
   })
-  
+  # value boxes
   output$volumetria <- renderValueBox({
     valueBox(
       value = nrow(dados_filtrados()),
@@ -207,8 +233,8 @@ server <- function(input, output, session) {
   })
   
   observe({
-    custo_armazen <- input$custo_armazen
-    preco_lotacao <- input$preco_lotacao
+    custo_armazen <- input$custo_armazen 
+    preco_lotacao <- input$preco_lotacao 
     
   })
   output$tabela_notinhas <- renderDataTable({
@@ -225,12 +251,127 @@ server <- function(input, output, session) {
         select = 'single',
         ordering = FALSE
       ),
-      callback = JS(
-        "table.on('select', function(e, dt, type, indexes) {",
-        "  var selectedData = table.rows(indexes).data().toArray();",
-        "  Shiny.setInputValue('selected_notinhas', selectedData);",
-        "});"
+    )
+  })
+  
+  melhor_combinacao_veiculos <- reactive({
+    cubagem_total <- sum(dados_filtrados()$Cubagem)
+    peso_nf_total <- sum(dados_filtrados()$`Peso NF`)
+    valor_nf_total <- sum(dados_filtrados()$`Valor da NF`)
+    
+    num_carretas <- 0
+    num_trucks <- 0
+    num_tocos <- 0
+    num_34s <- 0 
+    
+    while (cubagem_total > 0 & peso_nf_total > 0 & valor_nf_total > 0) {
+      if (cubagem_total > 100) {
+        num_carretas <- num_carretas + 1
+        cubagem_total <- cubagem_total - (100 * 0.8)
+      } else if (cubagem_total > 42.5) {
+        num_trucks <- num_trucks + 1
+        cubagem_total <- cubagem_total - (42.5 * 0.8)
+      } else if (cubagem_total > 22.5){
+        num_tocos <- num_tocos + 1
+        cubagem_total <- cubagem_total - (22.5 * 0.8)
+      } else {
+        num_34s <- num_34s + 1
+        cubagem_total <- cubagem_total - (20 * 0.8)
+      }
+    }
+    
+    return(list(num_carretas, num_trucks, num_tocos, num_34s))
+  })
+  
+  output$num_carretas <- renderValueBox({
+    num_carretas <- melhor_combinacao_veiculos()[[1]]
+    valueBox(
+      value = num_carretas,
+      subtitle = "Número de carretas",
+      icon = icon("truck"),
+      color = "aqua"
+    )
+  })
+  
+  output$num_trucks <- renderValueBox({
+    num_trucks <- melhor_combinacao_veiculos()[[2]]
+    valueBox(
+      value = num_trucks,
+      subtitle = "Número de trucks",
+      icon = icon("truck"),
+      color = "aqua"
+    )
+  })
+  
+  output$num_tocos <- renderValueBox({
+    num_tocos <- melhor_combinacao_veiculos()[[3]]
+    valueBox(
+      value = num_tocos,
+      subtitle = "Número de tocos",
+      icon = icon("truck"),
+      color = "aqua"
+    )
+  })
+  
+  output$num_34s <- renderValueBox({
+    num_34s <- melhor_combinacao_veiculos()[[4]]
+    valueBox(
+      value = num_34s,
+      subtitle = "Número de 3/4",
+      icon = icon("truck"),
+      color = "aqua"
+    )
+  })
+  
+  chaves <- reactiveVal(character(0))
+  
+  observeEvent(input$add_veiculo_btn, {
+    origem_selecionada <- input$origem
+    cidade_transbordo_selecionada <- input$cidade_transbordo
+    if (!is.null(origem_selecionada) && !is.null(cidade_transbordo_selecionada)) {
+      filtered_Transb <- filter(Transb, ORIGEM == origem_selecionada)
+      filtered_Transb <- filter(filtered_Transb, CONCATENA == cidade_transbordo_selecionada)
+    }
+    
+    showModal(modalDialog(
+      id = "modal_veiculo",
+      title = "Selecione o Veículo",
+      selectInput("veiculo_selecionado", "Veículo", choices = filtered_Transb$VEICULO),
+      footer = tagList(
+        modalButton("Cancelar"),
+        actionButton("confirmar_veiculo", "Confirmar")
       )
+    ))
+  })
+  
+  observeEvent(input$confirmar_veiculo, {
+    veiculo_selecionado <- input$veiculo_selecionado
+    origem_selecionada <- input$origem
+    cidade_transbordo_selecionada <- input$cidade_transbordo
+    
+    if (!is.null(origem_selecionada) && !is.null(cidade_transbordo_selecionada)) {
+      chave <- gerar_chave(origem_selecionada, cidade_transbordo_selecionada, veiculo_selecionado)
+      chaves(c(chaves(), chave))
+    }
+    
+    removeModal()
+  })
+  
+  output$preco_lotacao <- renderValueBox({
+    chaves_registradas <- chaves()
+    custo_minimo_total <- 0  
+    
+    for (chave in chaves_registradas) {
+      transb_filtrado <- Transb[Transb$CHAVE == chave, ]
+      custo_minimo_chave <- min(transb_filtrado$FRETE)
+      custo_minimo_total <- custo_minimo_total + custo_minimo_chave
+      
+    }
+    valueBox(
+      value = custo_minimo_total,
+      subtitle = "Custo da Lotação",
+      icon = icon("dollar"),
+      color = "light-blue"
     )
   })
   
