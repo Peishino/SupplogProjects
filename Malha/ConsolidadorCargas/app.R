@@ -16,8 +16,8 @@ gerar_chave <- function(origem, cidade_transbordo, veiculo) {
 }
 
 # Carregando a base de dados de latitudes e longitudes 
-# load("LongLat.RData")
-# load("Transb.RData")
+load("LongLat.RData")
+load("Transb.RData")
 
 # UI recebe as características visuais que mais tarde vão iteragir com as funções do Server
 ui <- dashboardPage(
@@ -54,6 +54,7 @@ server <- function(input, output, session) {
     req(input$file)
     df <- read_xlsx(input$file$datapath)
     df$`Data Faturamento` <- as.Date(df$`Data Faturamento`, format = "%d/%m/%Y")
+    df <- df[!is.na(df$DISTRIBUICAO) & df$DISTRIBUICAO != "RETENCAO", ]
     return(df)
   })
   
@@ -263,6 +264,8 @@ server <- function(input, output, session) {
     num_trucks <- 0
     num_tocos <- 0
     num_34s <- 0 
+    
+    #acho que da para fazer um for que percorre todas as notinhas e vai somando por partes 
     
     while (cubagem_total > 0 & peso_nf_total > 0 & valor_nf_total > 0) {
       if (cubagem_total > 100) {
