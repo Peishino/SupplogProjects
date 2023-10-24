@@ -28,12 +28,19 @@ ui <- dashboardPage(
     selectInput("regiao", "Filtrar por Região", choices = c("Todos", NULL), selected = "Todos"),
     dateRangeInput("range_dates", "Selecione um período de datas:", start = NULL, end = NULL),
     selectInput("cidade_transbordo", "Cidade de Transbordo", choices = NULL),
-    actionButton("add_veiculo_btn", label = "Adicionar Veículo"),
-    numericInput("custo_armazen", "Custo do Armazen", value = NULL),
-    valueBoxOutput("preco_lotacao", width = 12)
+    numericInput("custo_armazen", "Reais KG Armazen", value = 0),
+    numericInput("custo_lotacao","Reais KG Lotação", value = 0),
+    numericInput("custo_pfinal", "Reais KG LastMail", value = 0)
   ),
   dashboardBody(
-    leafletOutput("mapa"),
+    fluidRow(
+      column(width = 9,
+        leafletOutput("mapa")
+        ),
+      column(width = 3,
+        plotOutput("grafico_demonstrativo")
+      )
+    ),
     fluidRow(
       valueBoxOutput("volumetria",width = 3),
       valueBoxOutput("cubagem",width = 3),
@@ -55,6 +62,7 @@ server <- function(input, output, session) {
     df <- read_xlsx(input$file$datapath)
     df$`Data Faturamento` <- as.Date(df$`Data Faturamento`, format = "%d/%m/%Y")
     df <- df[!is.na(df$DISTRIBUICAO) & df$DISTRIBUICAO != "RETENCAO", ]
+    df <- df %>% filter(!is.na(`Peso Kg`) & !is.na(`Custo NF`))
     return(df)
   })
   
@@ -233,11 +241,15 @@ server <- function(input, output, session) {
     )
   })
   
-  observe({
-    custo_armazen <- input$custo_armazen 
-    preco_lotacao <- input$preco_lotacao 
-    
+  valor_atual <- reactive({
+    data <- dados_filtrados()
+    custo_armazen <- input$custo_armazen
+    custo_lotacao <- input$custo_lotacao
+    custo_pfinal <- input$custo_pfinal
+    valor_atual <- sum(as.numeric(data$`Peso NF` * (custo_armazen + custo_lotacao + custo_pfinal)))
+    return(valor_atual)
   })
+  
   output$tabela_notinhas <- renderDataTable({
     data <- dados_filtrados()
     columns_to_show <- c('Filial', 'Nota Fiscal','Concatenar cidade', 'Tomador', 'Cubagem', 'Peso NF', 'Valor da NF')
@@ -377,6 +389,28 @@ server <- function(input, output, session) {
       color = "light-blue"
     )
   })
+  
+  output$grafico_demonstrativo <- renderPlot({
+    data <- dados_filtrados()
+    
+    # Filtrar apenas as entradas com valores numéricos em 'Custo NF'
+    data <- data[!is.na(as.numeric(data$`Custo NF`)), ]
+    
+    valor_nf <- sum(as.numeric(data$`Custo NF`))
+    custo_simulado <- valor_atual()
+    
+    df <- data.frame(Custo = c("Valor da NF", "Custo Simulado"), Valor = c(valor_nf, custo_simulado))
+    
+    # Crie um gráfico de barras para comparar o custo da NF com o custo simulado
+    grafico <- ggplot(df, aes(x = Custo, y = Valor, fill = Custo)) +
+      geom_bar(stat = "identity", width = 0.5) +
+      labs(x = "", y = "Valor") +
+      scale_y_continuous(labels = scales::dollar_format(prefix = "R$")) +
+      theme_minimal()
+    
+    print(grafico)
+  })
+  
   
 }
 

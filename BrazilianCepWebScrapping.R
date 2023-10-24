@@ -2,37 +2,36 @@ library(tidyverse)
 library(rvest)
 library(stringr)
 
+# Site Lista Cep que contem todos os ceps do Brasil
+
 url <- "https://listacep.com/"
 
 html <- read_html(url)
 
-# o site é subdividido em outros sites por isso vamos procurar por alguns links
+# o site é subdividido em outros sites por isso vamos procurar por alguns links em listas ul
 
-estados <- html %>%
-  html_elements("ul a")%>%
-  html_attr("href")
+# Função para melhorar o código
 
-CidadesLinks <- c()
-for (link in estados){
-  html2 <- read_html(link)
-  
-  cidades <- html2 %>%
-    html_element("ul")%>%
-    html_elements("a")%>%
+extract_links <- function(url) {
+  html <- read_html(url)
+  html %>%
+    html_elements("ul a") %>%
     html_attr("href")
-  CidadesLinks <- c(CidadesLinks,cidades)
 }
 
-BairrosLinks <- c()
-for (links in CidadesLinks) {
-  html3 <- read_html(links)
-  
-  bairros <- html3 %>%
-    html_element("ul")%>%
-    html_elements("a")%>%
-    html_attr("href")
-  BairrosLinks <- c(BairrosLinks, bairros)
-}
+# como o número de cidades existentes é mais q 11000 os loops estavam pesando muito o código então decidi usar
+
+estados_links <- extract_links(url)
+
+cidades_links <- estados_links %>%
+  map(extract_links) %>%
+  flatten_chr()
+
+bairros_links <- cidades_links %>%
+  map(extract_links) %>%
+  flatten_chr()
+
+
 
 UfList <- c()
 CepsList <- c()
