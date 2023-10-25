@@ -38,7 +38,7 @@ ui <- dashboardPage(
         leafletOutput("mapa")
         ),
       column(width = 3,
-        plotOutput("grafico_demonstrativo")
+        plotOutput("grafico_demonstrativo")# duas abas
       )
     ),
     fluidRow(
@@ -246,7 +246,7 @@ server <- function(input, output, session) {
     custo_armazen <- input$custo_armazen
     custo_lotacao <- input$custo_lotacao
     custo_pfinal <- input$custo_pfinal
-    valor_atual <- sum(as.numeric(data$`Peso NF` * (custo_armazen + custo_lotacao + custo_pfinal)))
+    valor_atual <- sum(as.numeric((max(data$Cubagem*250,data$`Peso NF`)*custo_lotacao)+ (data$`Quantidade Volume`*custo_armazen) + (custo_pfinal*max(data$Cubagem*250,data$`Peso NF`))))
     return(valor_atual)
   })
   
@@ -340,56 +340,6 @@ server <- function(input, output, session) {
   
   chaves <- reactiveVal(character(0))
   
-  observeEvent(input$add_veiculo_btn, {
-    origem_selecionada <- input$origem
-    cidade_transbordo_selecionada <- input$cidade_transbordo
-    if (!is.null(origem_selecionada) && !is.null(cidade_transbordo_selecionada)) {
-      filtered_Transb <- filter(Transb, ORIGEM == origem_selecionada)
-      filtered_Transb <- filter(filtered_Transb, CONCATENA == cidade_transbordo_selecionada)
-    }
-    
-    showModal(modalDialog(
-      id = "modal_veiculo",
-      title = "Selecione o Veículo",
-      selectInput("veiculo_selecionado", "Veículo", choices = filtered_Transb$VEICULO),
-      footer = tagList(
-        modalButton("Cancelar"),
-        actionButton("confirmar_veiculo", "Confirmar")
-      )
-    ))
-  })
-  
-  observeEvent(input$confirmar_veiculo, {
-    veiculo_selecionado <- input$veiculo_selecionado
-    origem_selecionada <- input$origem
-    cidade_transbordo_selecionada <- input$cidade_transbordo
-    
-    if (!is.null(origem_selecionada) && !is.null(cidade_transbordo_selecionada)) {
-      chave <- gerar_chave(origem_selecionada, cidade_transbordo_selecionada, veiculo_selecionado)
-      chaves(c(chaves(), chave))
-    }
-    
-    removeModal()
-  })
-  
-  output$preco_lotacao <- renderValueBox({
-    chaves_registradas <- chaves()
-    custo_minimo_total <- 0  
-    
-    for (chave in chaves_registradas) {
-      transb_filtrado <- Transb[Transb$CHAVE == chave, ]
-      custo_minimo_chave <- min(transb_filtrado$FRETE)
-      custo_minimo_total <- custo_minimo_total + custo_minimo_chave
-      
-    }
-    valueBox(
-      value = custo_minimo_total,
-      subtitle = "Custo da Lotação",
-      icon = icon("dollar"),
-      color = "light-blue"
-    )
-  })
-  
   output$grafico_demonstrativo <- renderPlot({
     data <- dados_filtrados()
     
@@ -400,8 +350,7 @@ server <- function(input, output, session) {
     custo_simulado <- valor_atual()
     
     df <- data.frame(Custo = c("Valor da NF", "Custo Simulado"), Valor = c(valor_nf, custo_simulado))
-    
-    # Crie um gráfico de barras para comparar o custo da NF com o custo simulado
+
     grafico <- ggplot(df, aes(x = Custo, y = Valor, fill = Custo)) +
       geom_bar(stat = "identity", width = 0.5) +
       labs(x = "", y = "Valor") +
