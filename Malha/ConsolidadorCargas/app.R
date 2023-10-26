@@ -177,7 +177,7 @@ server <- function(input, output, session) {
     custo_armazen <- input$custo_armazen
     custo_lotacao <- input$custo_lotacao
     custo_pfinal <- input$custo_pfinal
-    valor_atual <- sum(as.numeric((max(data$Cubagem*250,data$`Peso NF`)*custo_lotacao)+ (data$`Quantidade Volume`*custo_armazen) + (custo_pfinal*max(data$Cubagem*250,data$`Peso NF`))))
+    valor_atual <- sum(max(sum(data$Cubagem)*250,data$`Peso NF`)*custo_lotacao,(data$`Quantidade Volume`*custo_armazen),(custo_pfinal*max(sum(data$Cubagem)*250,data$`Peso NF`)))
     return(valor_atual)
   })
   
