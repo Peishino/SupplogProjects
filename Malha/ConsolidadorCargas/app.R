@@ -15,12 +15,13 @@ gerar_chave <- function(origem, cidade_transbordo, veiculo) {
   return(chave)
 }
 
+
 # Carregando a base de dados de latitudes e longitudes 
 load("LongLat.RData")
 load("Transb.RData")
 
 # UI recebe as características visuais que mais tarde vão iteragir com as funções do Server
-ui <- dashboardPage(
+ui <- dashboardPage(skin = "black",
   dashboardHeader(title = "Consolidador"),
   dashboardSidebar(
     fileInput("file", "Inserir Planilha Excel"),
@@ -38,7 +39,9 @@ ui <- dashboardPage(
         leafletOutput("mapa")
         ),
       column(width = 3,
-        plotOutput("grafico_demonstrativo")# duas abas
+        valueBoxOutput(width = 12, "Valor_total"),
+        valueBoxOutput(width = 12, "Valor_Inputs"),
+        valueBoxOutput(width = 12, "Valor_restante")
       )
     ),
     fluidRow(
@@ -57,21 +60,27 @@ ui <- dashboardPage(
 
 # Server recebe as funções que serão executadas em cada visual definido pela UI
 server <- function(input, output, session) {
+  # Leitura da planilha input e alguns tratamentos
   dados <- reactive({
     req(input$file)
     df <- read_xlsx(input$file$datapath)
     df$`Data Faturamento` <- as.Date(df$`Data Faturamento`, format = "%d/%m/%Y")
     df <- df[!is.na(df$DISTRIBUICAO) & df$DISTRIBUICAO != "RETENCAO", ]
-    df <- df %>% filter(!is.na(`Peso Kg`) & !is.na(`Custo NF`))
+    df$`Custo NF` <- as.numeric(df$`Custo NF`)
+    df$`Peso Kg` <- as.numeric(df$`Peso Kg`)
+    df$Cubagem <- as.numeric(df$Cubagem)
+    df <- df %>% filter(!is.na(`Peso Kg`) & !is.na(`Custo NF`) & !is.na(Cubagem))
     return(df)
   })
   
-  # Escolhas possíveis do filtro de Origem
+  # Seleções de Filtros
+  {
+  # Origem
   observe({
     updateSelectInput(session, "origem", choices = c("Todos",unique(dados()$Filial)))
   })
   
-  # Regiões possíveis do filtro de Regiões, organizar uma visão por mesoregião.
+  # Regiões possíveis do filtro de Regiões (organizar uma visão por mesoregião).
   observe({
     origem <- input$origem
     if (!is.null(origem)) {
@@ -86,8 +95,7 @@ server <- function(input, output, session) {
       }
     }
   })
-  
-  # data
+  # Data
   observe({
     origem <- input$origem
     regiao <- input$regiao
@@ -106,9 +114,9 @@ server <- function(input, output, session) {
       updateDateRangeInput(session, "range_dates", start = min(dates), end = max(dates))
     }
   })
+  }
   
-  # cidade selecionavel
-
+  # Cidade selecionavel p/transbordo
   observeEvent(input$origem, {
     origem_selecionada <- input$origem
     
@@ -119,8 +127,6 @@ server <- function(input, output, session) {
       # Se "Todos" for selecionado, mostre todas as opções
       opcoes_filtradas <- unique(Transb$CONCATENA)
     }
-    
-    # Atualizar as opções do selectizeInput
     updateSelectizeInput(
       session,
       "cidade_transbordo",
@@ -142,6 +148,7 @@ server <- function(input, output, session) {
     )
   })
   
+  # Filtro dos Dados baseado nas seleções
   dados_filtrados <- reactive({
     filtered_data <- dados()
     
@@ -164,6 +171,18 @@ server <- function(input, output, session) {
     return(filtered_data)
   })
   
+  # Valor Custo Transbordo
+  valor_atual <- reactive({
+    data <- dados_filtrados()
+    custo_armazen <- input$custo_armazen
+    custo_lotacao <- input$custo_lotacao
+    custo_pfinal <- input$custo_pfinal
+    valor_atual <- sum(as.numeric((max(data$Cubagem*250,data$`Peso NF`)*custo_lotacao)+ (data$`Quantidade Volume`*custo_armazen) + (custo_pfinal*max(data$Cubagem*250,data$`Peso NF`))))
+    return(valor_atual)
+  })
+  
+  # icones pro Mapa 
+  {
   TransbIcon <- awesomeIcons(
     icon = 'truck-fast',
     iconColor = 'black',
@@ -176,7 +195,9 @@ server <- function(input, output, session) {
     library = 'fa',
     markerColor = 'orange'
   )
-  # mapa
+  }
+  
+  # Mapa
   output$mapa <- renderLeaflet({
     mapa <- leaflet(data = dados_filtrados()) %>%
       addTiles() %>%
@@ -204,7 +225,9 @@ server <- function(input, output, session) {
     
     return(mapa)
   })
-  # value boxes
+  
+  # ValueBoxes V.C.P.P.
+  {
   output$volumetria <- renderValueBox({
     valueBox(
       value = nrow(dados_filtrados()),
@@ -240,64 +263,9 @@ server <- function(input, output, session) {
       color = "blue"
     )
   })
-  
-  valor_atual <- reactive({
-    data <- dados_filtrados()
-    custo_armazen <- input$custo_armazen
-    custo_lotacao <- input$custo_lotacao
-    custo_pfinal <- input$custo_pfinal
-    valor_atual <- sum(as.numeric((max(data$Cubagem*250,data$`Peso NF`)*custo_lotacao)+ (data$`Quantidade Volume`*custo_armazen) + (custo_pfinal*max(data$Cubagem*250,data$`Peso NF`))))
-    return(valor_atual)
-  })
-  
-  output$tabela_notinhas <- renderDataTable({
-    data <- dados_filtrados()
-    columns_to_show <- c('Filial', 'Nota Fiscal','Concatenar cidade', 'Tomador', 'Cubagem', 'Peso NF', 'Valor da NF')
-    
-    datatable(
-      data[, columns_to_show, drop = FALSE],
-      options = list(
-        columnDefs = list(list(className = 'dt-center', targets = "_all")),
-        pageLength = 10,
-        dom = 'tip',
-        rownames = FALSE,
-        select = 'single',
-        ordering = FALSE
-      ),
-    )
-  })
-  
-  melhor_combinacao_veiculos <- reactive({
-    cubagem_total <- sum(dados_filtrados()$Cubagem)
-    peso_nf_total <- sum(dados_filtrados()$`Peso NF`)
-    valor_nf_total <- sum(dados_filtrados()$`Valor da NF`)
-    
-    num_carretas <- 0
-    num_trucks <- 0
-    num_tocos <- 0
-    num_34s <- 0 
-    
-    #acho que da para fazer um for que percorre todas as notinhas e vai somando por partes 
-    
-    while (cubagem_total > 0 & peso_nf_total > 0 & valor_nf_total > 0) {
-      if (cubagem_total > 100) {
-        num_carretas <- num_carretas + 1
-        cubagem_total <- cubagem_total - (100 * 0.8)
-      } else if (cubagem_total > 42.5) {
-        num_trucks <- num_trucks + 1
-        cubagem_total <- cubagem_total - (42.5 * 0.8)
-      } else if (cubagem_total > 22.5){
-        num_tocos <- num_tocos + 1
-        cubagem_total <- cubagem_total - (22.5 * 0.8)
-      } else {
-        num_34s <- num_34s + 1
-        cubagem_total <- cubagem_total - (20 * 0.8)
-      }
-    }
-    
-    return(list(num_carretas, num_trucks, num_tocos, num_34s))
-  })
-  
+  }
+  # ValueBoxes Veículos
+  {
   output$num_carretas <- renderValueBox({
     num_carretas <- melhor_combinacao_veiculos()[[1]]
     valueBox(
@@ -337,29 +305,92 @@ server <- function(input, output, session) {
       color = "aqua"
     )
   })
-  
-  chaves <- reactiveVal(character(0))
-  
-  output$grafico_demonstrativo <- renderPlot({
-    data <- dados_filtrados()
-    
-    # Filtrar apenas as entradas com valores numéricos em 'Custo NF'
-    data <- data[!is.na(as.numeric(data$`Custo NF`)), ]
-    
-    valor_nf <- sum(as.numeric(data$`Custo NF`))
-    custo_simulado <- valor_atual()
-    
-    df <- data.frame(Custo = c("Valor da NF", "Custo Simulado"), Valor = c(valor_nf, custo_simulado))
-
-    grafico <- ggplot(df, aes(x = Custo, y = Valor, fill = Custo)) +
-      geom_bar(stat = "identity", width = 0.5) +
-      labs(x = "", y = "Valor") +
-      scale_y_continuous(labels = scales::dollar_format(prefix = "R$")) +
-      theme_minimal()
-    
-    print(grafico)
+  }
+  # ValueBoxes Direita Grafico
+  {
+  output$Valor_total <- renderValueBox({
+    valor_total <- dados_filtrados()
+    valor_total <- sum(valor_total$`Custo NF`)
+    valueBox(
+      value = valor_total,
+      subtitle = "Custo NF Total",
+      icon = icon("coins"),
+      color = "orange"
+    )
   })
   
+  output$Valor_Inputs <- renderValueBox({
+    valor_inputs <- valor_atual()
+    valueBox(
+      value = valor_inputs,
+      subtitle = "Custo Transbordo",
+      icon = icon("truck"),
+      color =  "orange"
+    )
+  })
+  
+  output$Valor_restante <- renderValueBox({
+    valor_total <- dados_filtrados()
+    valor_total <- sum(valor_total$`Custo NF`)
+    valor_restante <- ifelse(valor_atual() == 0, 0,valor_total - valor_atual())
+    valueBox(
+      value = valor_restante,
+      subtitle = "Restante",
+      icon = icon("sack-dollar"),
+      color = "orange"
+    )
+  })
+  }
+  
+  # Tabela Com as Notas Fiscais
+  output$tabela_notinhas <- renderDataTable({
+    data <- dados_filtrados()
+    columns_to_show <- c('Filial', 'Nota Fiscal','Concatenar cidade', 'Tomador', 'Cubagem', 'Peso NF', 'Valor da NF')
+    
+    datatable(
+      data[, columns_to_show, drop = FALSE],
+      options = list(
+        columnDefs = list(list(className = 'dt-center', targets = "_all")),
+        pageLength = 10,
+        dom = 'tip',
+        rownames = FALSE,
+        select = 'single',
+        ordering = FALSE
+      ),
+    )
+  })
+  
+  # Combinação de veículos 
+  melhor_combinacao_veiculos <- reactive({
+    cubagem_total <- sum(dados_filtrados()$Cubagem)
+    peso_nf_total <- sum(dados_filtrados()$`Peso NF`)
+    valor_nf_total <- sum(dados_filtrados()$`Valor da NF`)
+    
+    num_carretas <- 0
+    num_trucks <- 0
+    num_tocos <- 0
+    num_34s <- 0 
+    
+    while (cubagem_total > 0 & peso_nf_total > 0 & valor_nf_total > 0) {
+      if (cubagem_total > 100) {
+        num_carretas <- num_carretas + 1
+        cubagem_total <- cubagem_total - (100 * 0.8)
+      } else if (cubagem_total > 42.5) {
+        num_trucks <- num_trucks + 1
+        cubagem_total <- cubagem_total - (42.5 * 0.8)
+      } else if (cubagem_total > 22.5){
+        num_tocos <- num_tocos + 1
+        cubagem_total <- cubagem_total - (22.5 * 0.8)
+      } else {
+        num_34s <- num_34s + 1
+        cubagem_total <- cubagem_total - (20 * 0.8)
+      }
+    }
+    
+    return(list(num_carretas, num_trucks, num_tocos, num_34s))
+  })
+  
+  chaves <- reactiveVal(character(0))
   
 }
 
