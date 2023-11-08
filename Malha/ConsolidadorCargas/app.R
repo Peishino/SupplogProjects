@@ -31,7 +31,7 @@ ui <- dashboardPage(skin = "black",
     selectInput("cidade_transbordo", "Cidade de Transbordo", choices = NULL),
     numericInput("custo_armazen", "Reais KG Armazen", value = 0),
     numericInput("custo_lotacao","Reais KG Lotação", value = 0),
-    numericInput("custo_pfinal", "Reais KG LastMail", value = 0)
+    numericInput("custo_pfinal", "Reais KG Ponta final", value = 0)
   ),
   dashboardBody(
     fluidRow(
@@ -68,8 +68,11 @@ server <- function(input, output, session) {
     df <- df[!is.na(df$DISTRIBUICAO) & df$DISTRIBUICAO != "RETENCAO", ]
     df$`Custo NF` <- as.numeric(df$`Custo NF`)
     df$`Peso Kg` <- as.numeric(df$`Peso Kg`)
+    df$`Peso NF` <- as.numeric(df$`Peso NF`)
+    df$`Latitude` <- ifelse(df$Latitude == "n",NA,df$Latitude)
+    df$`Longitude` <- ifelse(df$Longitude == "n", NA, df$Longitude)
     df$Cubagem <- as.numeric(df$Cubagem)
-    df <- df %>% filter(!is.na(`Peso Kg`) & !is.na(`Custo NF`) & !is.na(Cubagem))
+    df <- df %>% filter(!is.na(`Peso Kg`) & !is.na(`Custo NF`) & !is.na(Cubagem) & !is.na(`Peso NF`) & !is.na(`Latitude`) & !is.na(`Longitude`))
     return(df)
   })
   
