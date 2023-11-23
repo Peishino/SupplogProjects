@@ -1,0 +1,151 @@
+---
+title: "Previsão de Combustíveis para 2024"
+author: "Gabriel Moreira"
+date: "2023-11-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Pacotes que vamos precisar
+
+```{r, echo=FALSE, results='hide'}
+library(tidyverse)
+library(readxl)
+library(xts)
+library(forecast)
+library(writexl)
+```
+
+
+# Data Wrangling
+
+## O Data Wrangling envolve a coleta, limpeza e transformação de dados para torná-los adequados para análise.
+
+Como os dados disponíveis no site "" eram organizados em alguns arquivos Excel consolidados precisamos utilizar uma "skill" chamada Data Integration. 
+Data Integration: Envolve a combinação de dados de várias fontes em um único conjunto de dados. No caso, integrando dados de vários arquivos Excel em um único dataframe.
+
+```{r, echo = TRUE}
+arquivos_excel <- list.files(path = getwd(), pattern = "\\.xlsx$", full.names = TRUE)
+BD <- arquivos_excel %>%
+  map_df(~ read_excel(.x))
+BD$Mes <- as.yearmon(BD$`DATA INICIAL`)
+BD <- BD[,c(3,4,5,6,9,20)]
+colnames(BD) <- c("Regiao","Estado","Municipio","Produto","PrecoMedio","Mes")
+head(BD)
+```
+
+
+Agora, desejo agrupar os dados em meses e logo em seguida dividir os dados em diversas bases, uma para cada estado, categorizando cada uma delas por tipo de combustível.
+
+```{r}
+BaseConsolidada <- BD %>% 
+  group_by(Mes, Estado, Produto) %>%
+  summarise(
+    Media_Revenda = mean(`PrecoMedio`)
+  )
+
+combinacoes <- BaseConsolidada[,c(-1,-4)]
+combinacoes <- combinacoes %>%
+  distinct()
+
+bases_filtradas <- list()
+
+
+for (i in 1:nrow(combinacoes)) {
+  estado <- combinacoes[i, "Estado"][[1]]
+  produto <- combinacoes[i, "Produto"][[1]]
+
+  filtro <- BaseConsolidada[BaseConsolidada$Estado == estado & BaseConsolidada$Produto == produto, ]
+  filtro_selecionado <- filtro[, c("Mes", "Media_Revenda")]
+
+  nome_lista <- paste0(estado, "_", produto, "_historico")
+  bases_filtradas[[nome_lista]] <- filtro_selecionado
+}
+
+```
+
+# Modelagem de séries temporais
+
+## validação retroativa (backtesting)
+
+Empregaremos o modelo para realizar previsões dos preços desses tipos de combustíveis para o ano de 2023, e validaremos os resultados obtidos.
+O MAE (Erro Médio Absoluto) e o MSE (Erro Médio Quadrático) são métricas de erro que indicam quão bem as previsões do modelo estão se saindo em comparação com os valores reais. 
+
+```{r}
+
+resultados_previsoes <- list()
+
+for (nome_lista in names(bases_filtradas)) {
+  serie_temporal <- ts(bases_filtradas[[nome_lista]]$Media_Revenda, frequency = 12, start = c(2005, 1), end = c(2023, 10))
+  modelo <- auto.arima(serie_temporal)
+  conjunto_teste <- window(serie_temporal, start = c(2023, 1), end = c(2023, 10))
+  previsao <- forecast(modelo, h = length(conjunto_teste))
+  resultados <- data.frame(Real = as.numeric(conjunto_teste), Previsto = as.numeric(previsao$mean))
+  mae <- mean(abs(resultados$Real - resultados$Previsto))
+  mse <- mean((resultados$Real - resultados$Previsto)^2)
+  resultados_previsoes[[nome_lista]] <- list(resultados = resultados, MAE = mae, MSE = mse)
+}
+```
+
+
+## Modelo
+
+```{r}
+prever_media_revenda <- function(base) {
+  serie_temporal <- ts(base$Media_Revenda, frequency = 12)
+  modelo <- auto.arima(serie_temporal)
+  previsao <- forecast(modelo, h = 14)
+  return(previsao)
+}
+previsoes_lista <- list()
+
+for (nome_lista in names(bases_filtradas)) {
+  base <- bases_filtradas[[nome_lista]]
+  previsao <- prever_media_revenda(base)
+  previsoes_lista[[nome_lista]] <- previsao
+}
+```
+
+## Consolidando a base
+
+```{r}
+dfs_individuais <- list()
+
+for (nome_lista in names(previsoes_lista)) {
+  nome_parts <- strsplit(nome_lista, "_")[[1]]
+  estado <- nome_parts[1]
+  tipo_combustivel <- nome_parts[2]
+  previsao <- previsoes_lista[[nome_lista]]
+  dados_previsao <- data.frame(
+    Estado = estado,
+    Tipo_Combustivel = tipo_combustivel,
+    Nov_2023 = previsao$mean[1],
+    Dez_2023 = previsao$mean[2],
+    Jan_2024 = previsao$mean[3],
+    Fev_2024 = previsao$mean[4],
+    Mar_2024 = previsao$mean[5],
+    Abr_2024 = previsao$mean[6],
+    Mai_2024 = previsao$mean[7],
+    Jun_2024 = previsao$mean[8],
+    Jul_2024 = previsao$mean[9],
+    Ago_2024 = previsao$mean[10],
+    Set_2024 = previsao$mean[11],
+    Out_2024 = previsao$mean[12],
+    Nov_2024 = previsao$mean[13],
+    Dez_2024 = previsao$mean[14]
+  )
+  dfs_individuais[[nome_lista]] <- dados_previsao
+}
+df_consolidado <- do.call(rbind, dfs_individuais)
+```
+
+# Agora vamos converter em Excel para entregar ao tomador de decisão!
+
+```{r}
+write_xlsx(df_consolidado, "Previsao2024.xlsx")
+```
+
