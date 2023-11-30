@@ -43,7 +43,7 @@ Agora, desejo agrupar os dados em meses e logo em seguida dividir os dados em di
 
 ```{r}
 BaseConsolidada <- BD %>% 
-  group_by(Mes, Estado, Produto) %>%
+  group_by(Mes,Municipio, Produto) %>%
   summarise(
     Media_Revenda = mean(`PrecoMedio`)
   )
@@ -56,17 +56,29 @@ bases_filtradas <- list()
 
 
 for (i in 1:nrow(combinacoes)) {
-  estado <- combinacoes[i, "Estado"][[1]]
+  municipio <- combinacoes[i, "Municipio"][[1]]
   produto <- combinacoes[i, "Produto"][[1]]
 
-  filtro <- BaseConsolidada[BaseConsolidada$Estado == estado & BaseConsolidada$Produto == produto, ]
+  filtro <- BaseConsolidada[BaseConsolidada$Municipio == municipio & BaseConsolidada$Produto == produto, ]
   filtro_selecionado <- filtro[, c("Mes", "Media_Revenda")]
 
-  nome_lista <- paste0(estado, "_", produto, "_historico")
+  nome_lista <- paste0(municipio, "_", produto, "_historico")
   bases_filtradas[[nome_lista]] <- filtro_selecionado
 }
 
 ```
+a
+```{r}
+teste <- ts(bases_filtradas$`UBERLANDIA_GASOLINA COMUM_historico`$Media_Revenda)
+serie_temporal_diff <- diff(teste, differences = 1)
+modelo_teste <- auto.arima(serie_temporal_diff, stepwise = FALSE, approximation = FALSE,
+                       seasonal = TRUE, lambda = "auto",
+                       stationary = FALSE)
+previsao_teste <- forecast(modelo_teste, h = 12)
+previsao_original <- cumsum(c(teste[length(teste)], previsao_teste$mean))
+previsao_original
+```
+
 
 # Modelagem de séries temporais
 
@@ -76,15 +88,18 @@ Empregaremos o modelo para realizar previsões dos preços desses tipos de combu
 O MAE (Erro Médio Absoluto) e o MSE (Erro Médio Quadrático) são métricas de erro que indicam quão bem as previsões do modelo estão se saindo em comparação com os valores reais. 
 
 ```{r}
-
 resultados_previsoes <- list()
 
 for (nome_lista in names(bases_filtradas)) {
   serie_temporal <- ts(bases_filtradas[[nome_lista]]$Media_Revenda, frequency = 12, start = c(2005, 1), end = c(2023, 10))
-  modelo <- auto.arima(serie_temporal)
+  serie_temporal_diff <- diff(serie_temporal, differences = 1)
+  modelo <- auto.arima(serie_temporal_diff, stepwise = FALSE, approximation = FALSE,
+                       seasonal = TRUE, lambda = "auto",
+                       stationary = FALSE)
   conjunto_teste <- window(serie_temporal, start = c(2023, 1), end = c(2023, 10))
   previsao <- forecast(modelo, h = length(conjunto_teste))
-  resultados <- data.frame(Real = as.numeric(conjunto_teste), Previsto = as.numeric(previsao$mean))
+  previsao_original <- cumsum(c(previsao$mean))
+  resultados <- data.frame(Real = as.numeric(conjunto_teste), Previsto = as.numeric(previsao_original))
   mae <- mean(abs(resultados$Real - resultados$Previsto))
   mse <- mean((resultados$Real - resultados$Previsto)^2)
   resultados_previsoes[[nome_lista]] <- list(resultados = resultados, MAE = mae, MSE = mse)
@@ -117,29 +132,22 @@ dfs_individuais <- list()
 
 for (nome_lista in names(previsoes_lista)) {
   nome_parts <- strsplit(nome_lista, "_")[[1]]
-  estado <- nome_parts[1]
+  municipio <- nome_parts[1]
   tipo_combustivel <- nome_parts[2]
   previsao <- previsoes_lista[[nome_lista]]
+  
   dados_previsao <- data.frame(
-    Estado = estado,
-    Tipo_Combustivel = tipo_combustivel,
-    Nov_2023 = previsao$mean[1],
-    Dez_2023 = previsao$mean[2],
-    Jan_2024 = previsao$mean[3],
-    Fev_2024 = previsao$mean[4],
-    Mar_2024 = previsao$mean[5],
-    Abr_2024 = previsao$mean[6],
-    Mai_2024 = previsao$mean[7],
-    Jun_2024 = previsao$mean[8],
-    Jul_2024 = previsao$mean[9],
-    Ago_2024 = previsao$mean[10],
-    Set_2024 = previsao$mean[11],
-    Out_2024 = previsao$mean[12],
-    Nov_2024 = previsao$mean[13],
-    Dez_2024 = previsao$mean[14]
+    Municipio = rep(municipio, 14),
+    Tipo_Combustivel = rep(tipo_combustivel, 14),
+    Data = c("Nov_2023", "Dez_2023", "Jan_2024", "Fev_2024", "Mar_2024", "Abr_2024", "Mai_2024", "Jun_2024", 
+             "Jul_2024", "Ago_2024", "Set_2024", "Out_2024", "Nov_2024", "Dez_2024"),
+    Min = previsao$lower,
+    Max = previsao$upper
   )
+  
   dfs_individuais[[nome_lista]] <- dados_previsao
 }
+
 df_consolidado <- do.call(rbind, dfs_individuais)
 ```
 
